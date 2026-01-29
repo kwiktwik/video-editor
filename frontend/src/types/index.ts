@@ -15,6 +15,7 @@ export interface VideoClip {
   startTime: number;
   endTime: number;
   thumbnail?: string;
+  track: number; // Track/row number (0 = bottom track, higher numbers = upper tracks)
   effects: ClipEffects;
   textOverlays: TextOverlay[];
   imageOverlays: ImageOverlay[];
@@ -41,6 +42,7 @@ export interface ImageOverlay {
   id: string;
   imageUrl: string;
   imageShape: 'CIRCLE' | 'RECTANGLE' | 'SQUARE';
+  shapeImageUrl?: string;
   percentageWidth: number;
   percentageFromTop: number;
   percentageFromStart: number;

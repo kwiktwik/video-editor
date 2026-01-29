@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { useEditorStore } from '@/store/editorStore';
 import VideoPreview from './VideoPreview';
 import VideoLibrary from './VideoLibrary';
@@ -12,7 +13,8 @@ import ExportPanel from './ExportPanel';
 type Tab = 'effects' | 'audio' | 'export';
 
 export default function EditorScreen() {
-  const { videos, clips, currentVideoId, setScreen } = useEditorStore();
+  const { videos, clips, currentVideoId } = useEditorStore();
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState<Tab>('effects');
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
 
@@ -24,7 +26,7 @@ export default function EditorScreen() {
       <header className="h-14 bg-[#1a1a1a] border-b border-[#2a2a2a] flex items-center justify-between px-4 flex-shrink-0">
         <div className="flex items-center gap-4">
           <button
-            onClick={() => setScreen('upload')}
+            onClick={() => router.push('/')}
             className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -39,7 +41,7 @@ export default function EditorScreen() {
             {clips.length} clip{clips.length !== 1 ? 's' : ''} in timeline
           </span>
           <button
-            onClick={() => setScreen('processing')}
+            onClick={() => router.push('/export')}
             disabled={clips.length === 0}
             className="px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-600 disabled:cursor-not-allowed rounded-lg font-medium transition-colors flex items-center gap-2"
           >

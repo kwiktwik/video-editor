@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
+import { useRouter } from 'next/navigation';
 import { useEditorStore } from '@/store/editorStore';
 import { ExportSettings } from '@/types';
 import { startExport, getJobStatus, cancelJob, getAllJobs, getJobStats } from '@/lib/api';
@@ -16,8 +17,8 @@ export default function ProcessingScreen() {
     updateJob,
     removeJob,
     addJobLog,
-    setScreen,
   } = useEditorStore();
+  const router = useRouter();
 
   const [isExporting, setIsExporting] = useState(false);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
@@ -342,7 +343,7 @@ export default function ProcessingScreen() {
         <div className="flex items-center justify-between mb-8">
           <div className="flex items-center gap-4">
             <button
-              onClick={() => setScreen('editor')}
+              onClick={() => router.push('/edit')}
               className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">

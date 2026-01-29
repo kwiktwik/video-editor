@@ -1,12 +1,14 @@
 'use client';
 
 import React, { useState, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import { useDropzone } from 'react-dropzone';
 import { useEditorStore } from '@/store/editorStore';
 import { uploadVideo, uploadVideoFromUrl, getFullUrl } from '@/lib/api';
 
 export default function UploadScreen() {
-  const { videos, addVideo, removeVideo, setScreen, setCurrentVideo } = useEditorStore();
+  const { videos, addVideo, removeVideo, setCurrentVideo } = useEditorStore();
+  const router = useRouter();
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<Record<string, number>>({});
   const [urlInput, setUrlInput] = useState('');
@@ -153,7 +155,7 @@ export default function UploadScreen() {
   const handleProceed = () => {
     if (videos.length > 0) {
       setCurrentVideo(videos[0].id);
-      setScreen('editor');
+      router.push('/edit');
     }
   };
 

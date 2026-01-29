@@ -40,6 +40,7 @@ class ClipRequest(BaseModel):
     video_url: str
     start_time: float
     end_time: float
+    track: int = 0
     effects: ClipEffects
     text_overlays: List[TextOverlay] = []
     image_overlays: List[ImageOverlay] = []

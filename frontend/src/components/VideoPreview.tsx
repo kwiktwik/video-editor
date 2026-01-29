@@ -1,15 +1,109 @@
 'use client';
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, startTransition } from 'react';
 import { VideoFile } from '@/types';
 import { useEditorStore } from '@/store/editorStore';
+import { generateThumbnail, getFullUrl } from '@/lib/api';
+
+interface TimeInputProps {
+  value: number;
+  onChange: (value: number) => void;
+  min?: number;
+  max?: number;
+  step?: number;
+  placeholder?: string;
+  className?: string;
+}
+
+function TimeInput({ value, onChange, min = 0, max = 3600, step = 0.1, placeholder = "0.0", className = "" }: TimeInputProps) {
+  const [inputValue, setInputValue] = useState(value.toFixed(1));
+  const [isValid, setIsValid] = useState(true);
+  const isEditingRef = useRef(false);
+
+  const validateAndClampValue = (numValue: number) => {
+    return Math.max(min, Math.min(max, numValue));
+  };
+
+  // Update input value when prop value changes and not editing
+  React.useLayoutEffect(() => {
+    if (!isEditingRef.current) {
+      setInputValue(value.toFixed(1));
+      setIsValid(true);
+    }
+  }, [value]);
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newValue = e.target.value;
+    setInputValue(newValue);
+
+    const numValue = parseFloat(newValue);
+    if (!isNaN(numValue)) {
+      const clampedValue = validateAndClampValue(numValue);
+      setIsValid(clampedValue === numValue || (numValue >= min && numValue <= max));
+      onChange(clampedValue);
+    } else {
+      setIsValid(newValue === "" || /^\d*\.?\d*$/.test(newValue));
+    }
+  };
+
+  const handleBlur = () => {
+    isEditingRef.current = false;
+    const numValue = parseFloat(inputValue);
+    if (isNaN(numValue)) {
+      setInputValue(value.toFixed(1));
+      setIsValid(true);
+    } else {
+      const clampedValue = validateAndClampValue(numValue);
+      setInputValue(clampedValue.toFixed(1));
+      setIsValid(true);
+      onChange(clampedValue);
+    }
+  };
+
+  const handleFocus = () => {
+    isEditingRef.current = true;
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.currentTarget.blur();
+    } else if (e.key === 'Escape') {
+      setInputValue(value.toFixed(1));
+      setIsValid(true);
+      e.currentTarget.blur();
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      const newValue = validateAndClampValue(value + step);
+      onChange(newValue);
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      const newValue = validateAndClampValue(value - step);
+      onChange(newValue);
+    }
+  };
+
+  return (
+    <input
+      type="text"
+      value={inputValue}
+      onChange={handleInputChange}
+      onBlur={handleBlur}
+      onFocus={handleFocus}
+      onKeyDown={handleKeyDown}
+      placeholder={placeholder}
+      className={`bg-[#2a2a2a] border rounded px-2 py-1 text-sm text-white focus:outline-none focus:ring-1 transition-colors ${className} ${
+        isValid ? 'border-[#3a3a3a] focus:border-blue-500 focus:ring-blue-500/20' : 'border-red-500 focus:border-red-500 focus:ring-red-500/20'
+      }`}
+    />
+  );
+}
 
 interface VideoPreviewProps {
   video: VideoFile;
 }
 
 export default function VideoPreview({ video }: VideoPreviewProps) {
-  const { addClip, videos } = useEditorStore();
+  const { addClip, clips } = useEditorStore();
   const videoRef = useRef<HTMLVideoElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -18,15 +112,19 @@ export default function VideoPreview({ video }: VideoPreviewProps) {
   const [trimEnd, setTrimEnd] = useState(video.duration || 0);
   const [videoError, setVideoError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isSeeking, setIsSeeking] = useState(false);
 
   useEffect(() => {
     console.log('[VideoPreview] Video changed:', { id: video.id, url: video.url, duration: video.duration });
-    setTrimStart(0);
-    setTrimEnd(video.duration || 0);
-    setCurrentTime(0);
-    setIsPlaying(false);
-    setVideoError(null);
-    setIsLoading(true);
+    // Reset video state when video changes
+    startTransition(() => {
+      setTrimStart(0);
+      setTrimEnd(video.duration || 0);
+      setCurrentTime(0);
+      setIsPlaying(false);
+      setVideoError(null);
+      setIsLoading(true);
+    });
     if (videoRef.current) {
       videoRef.current.currentTime = 0;
       videoRef.current.load(); // Force reload when video changes
@@ -56,7 +154,7 @@ export default function VideoPreview({ video }: VideoPreviewProps) {
   };
 
   const handleTimeUpdate = () => {
-    if (videoRef.current) {
+    if (videoRef.current && !isSeeking) {
       setCurrentTime(videoRef.current.currentTime);
     }
   };
@@ -74,10 +172,19 @@ export default function VideoPreview({ video }: VideoPreviewProps) {
 
   const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
     const time = parseFloat(e.target.value);
+    setIsSeeking(true);
     setCurrentTime(time);
     if (videoRef.current) {
       videoRef.current.currentTime = time;
     }
+  };
+
+  const handleSeekStart = () => {
+    setIsSeeking(true);
+  };
+
+  const handleSeekEnd = () => {
+    setTimeout(() => setIsSeeking(false), 150);
   };
 
   const formatTime = (seconds: number): string => {
@@ -87,25 +194,117 @@ export default function VideoPreview({ video }: VideoPreviewProps) {
     return `${mins}:${secs.toString().padStart(2, '0')}.${ms.toString().padStart(2, '0')}`;
   };
 
-  const handleAddToTimeline = () => {
+  // Helper function to find the next available position and track
+  const findNextPosition = (clipDuration: number): { track: number, startTime: number } => {
+    // Always try to place sequentially on track 0 first
+    // Find the latest end time on track 0 only
+    let latestEndTimeOnTrack0 = 0;
+    clips.forEach(clip => {
+      if (clip.track === 0) {
+        latestEndTimeOnTrack0 = Math.max(latestEndTimeOnTrack0, clip.endTime);
+      }
+    });
+
+    // Try to place on track 0 at the end
+    const proposedStartTime = latestEndTimeOnTrack0;
+    const proposedEndTime = proposedStartTime + clipDuration;
+
+    // Check if track 0 has any conflicts at this time
+    const hasConflictOnTrack0 = clips.some(clip =>
+      clip.track === 0 &&
+      !(proposedEndTime <= clip.startTime || proposedStartTime >= clip.endTime)
+    );
+
+    if (!hasConflictOnTrack0) {
+      return { track: 0, startTime: proposedStartTime };
+    }
+
+    // If there's a conflict on track 0, find the earliest available time on track 0
+    // or place on another track
+    for (let track = 0; track < 10; track++) {
+      // For track 0, find the next available slot
+      if (track === 0) {
+        // Find gaps in track 0
+        const track0Clips = clips.filter(c => c.track === 0).sort((a, b) => a.startTime - b.startTime);
+        let earliestAvailable = 0;
+
+        for (const clip of track0Clips) {
+          if (earliestAvailable + clipDuration <= clip.startTime) {
+            return { track: 0, startTime: earliestAvailable };
+          }
+          earliestAvailable = Math.max(earliestAvailable, clip.endTime);
+        }
+
+        // Check if we can place at the end
+        if (earliestAvailable + clipDuration <= proposedEndTime) {
+          return { track: 0, startTime: earliestAvailable };
+        }
+      } else {
+        // For other tracks, place at the same time as track 0's latest
+        const trackHasConflict = clips.some(clip =>
+          clip.track === track &&
+          !(proposedEndTime <= clip.startTime || proposedStartTime >= clip.endTime)
+        );
+
+        if (!trackHasConflict) {
+          return { track, startTime: proposedStartTime };
+        }
+      }
+    }
+
+    // Fallback: place on the highest track
+    const maxTrack = clips.length > 0 ? Math.max(...clips.map(c => c.track)) : 0;
+    return { track: maxTrack + 1, startTime: proposedStartTime };
+  };
+
+  const handleAddToTimeline = async () => {
     if (trimStart >= trimEnd) {
       alert('Invalid trim selection. Start time must be before end time.');
       return;
     }
 
-    addClip({
-      videoId: video.id,
-      videoName: video.name,
-      startTime: trimStart,
-      endTime: trimEnd,
-      effects: {
-        fadeIn: 0,
-        fadeOut: 0,
-        speed: 1,
-      },
-      textOverlays: [],
-      imageOverlays: [],
-    });
+    const clipDuration = trimEnd - trimStart;
+    const { track, startTime } = findNextPosition(clipDuration);
+    const endTime = startTime + clipDuration;
+
+    try {
+      // Generate thumbnail for the clip
+      const thumbnailResponse = await generateThumbnail(video.id, trimStart);
+      const thumbnailUrl = getFullUrl(thumbnailResponse.url);
+
+      addClip({
+        videoId: video.id,
+        videoName: video.name,
+        startTime,
+        endTime,
+        thumbnail: thumbnailUrl,
+        track,
+        effects: {
+          fadeIn: 0,
+          fadeOut: 0,
+          speed: 1,
+        },
+        textOverlays: [],
+        imageOverlays: [],
+      });
+    } catch (error) {
+      console.warn('Failed to generate thumbnail, adding clip without thumbnail:', error);
+      // Add clip without thumbnail if thumbnail generation fails
+      addClip({
+        videoId: video.id,
+        videoName: video.name,
+        startTime,
+        endTime,
+        track,
+        effects: {
+          fadeIn: 0,
+          fadeOut: 0,
+          speed: 1,
+        },
+        textOverlays: [],
+        imageOverlays: [],
+      });
+    }
   };
 
   const setTrimStartToCurrent = () => {
@@ -193,6 +392,10 @@ export default function VideoPreview({ video }: VideoPreviewProps) {
           step={0.01}
           value={currentTime}
           onChange={handleSeek}
+          onMouseDown={handleSeekStart}
+          onMouseUp={handleSeekEnd}
+          onTouchStart={handleSeekStart}
+          onTouchEnd={handleSeekEnd}
           className="w-full"
         />
         {/* Trim Overlay */}
@@ -257,14 +460,13 @@ export default function VideoPreview({ video }: VideoPreviewProps) {
           <div>
             <label className="block text-xs text-gray-500 mb-1">Start Time</label>
             <div className="flex gap-2">
-              <input
-                type="number"
+              <TimeInput
+                value={trimStart}
+                onChange={(value) => setTrimStart(Math.max(0, Math.min(trimEnd - 0.1, value)))}
                 min={0}
-                max={trimEnd}
+                max={trimEnd - 0.1}
                 step={0.1}
-                value={trimStart.toFixed(1)}
-                onChange={(e) => setTrimStart(Math.max(0, parseFloat(e.target.value) || 0))}
-                className="flex-1 bg-[#2a2a2a] border border-[#3a3a3a] rounded px-2 py-1 text-sm text-white"
+                className="flex-1"
               />
               <button
                 onClick={setTrimStartToCurrent}
@@ -278,14 +480,13 @@ export default function VideoPreview({ video }: VideoPreviewProps) {
           <div>
             <label className="block text-xs text-gray-500 mb-1">End Time</label>
             <div className="flex gap-2">
-              <input
-                type="number"
-                min={trimStart}
+              <TimeInput
+                value={trimEnd}
+                onChange={(value) => setTrimEnd(Math.min(duration, Math.max(trimStart + 0.1, value)))}
+                min={trimStart + 0.1}
                 max={duration}
                 step={0.1}
-                value={trimEnd.toFixed(1)}
-                onChange={(e) => setTrimEnd(Math.min(duration, parseFloat(e.target.value) || duration))}
-                className="flex-1 bg-[#2a2a2a] border border-[#3a3a3a] rounded px-2 py-1 text-sm text-white"
+                className="flex-1"
               />
               <button
                 onClick={setTrimEndToCurrent}

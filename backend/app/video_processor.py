@@ -414,21 +414,43 @@ class VideoProcessor:
             log(f"Uploads directory: {self.uploads_dir}")
             
             processed_clips = []
+            clips_for_cleanup = []
             total_clips = len(clips_requests)
-            
+
             # Process each clip
             for i, clip_req in enumerate(clips_requests):
                 log(f"Processing clip {i + 1}/{total_clips}")
                 log(f"Clip video_url: {clip_req.video_url}")
+                log(f"Clip start_time: {clip_req.start_time}, duration: {clip_req.end_time - clip_req.start_time}")
                 clip = self.process_clip(clip_req, settings.aspect_ratio, settings.quality, log, url_resolver)
-                processed_clips.append(clip)
+                processed_clips.append((clip_req, clip))
+                clips_for_cleanup.append(clip)
                 progress_callback((i + 1) / total_clips * 50)  # 50% for clip processing
-            
-            log("Concatenating clips...")
+
+            log("Compositing clips...")
             if len(processed_clips) == 1:
-                final_video = processed_clips[0]
+                final_video = processed_clips[0][1]
+                # Remove from cleanup since it becomes final_video
+                clips_for_cleanup = [c for c in clips_for_cleanup if c != final_video]
             else:
-                final_video = concatenate_videoclips(processed_clips, method="compose")
+                # Find the total duration needed
+                max_end_time = max(clip_req.end_time for clip_req, _ in processed_clips)
+                log(f"Total timeline duration: {max_end_time}s")
+
+                # Sort clips by track (higher tracks should be on top)
+                processed_clips.sort(key=lambda x: getattr(x[0], 'track', 0), reverse=True)
+
+                # Create composite video clips positioned by their start times
+                video_clips = []
+                for clip_req, processed_clip in processed_clips:
+                    # Position the clip at its start time
+                    positioned_clip = processed_clip.set_start(clip_req.start_time)
+                    video_clips.append(positioned_clip)
+                    log(f"Positioned clip at {clip_req.start_time}s (track {getattr(clip_req, 'track', 0)})")
+
+                # Create composite with proper duration
+                final_video = CompositeVideoClip(video_clips, size=(processed_clip.w, processed_clip.h))
+                final_video = final_video.set_duration(max_end_time)
             
             progress_callback(60)
             
@@ -497,7 +519,7 @@ class VideoProcessor:
             log("Export completed successfully!")
             
             # Cleanup
-            for clip in processed_clips:
+            for clip in clips_for_cleanup:
                 clip.close()
             final_video.close()
             

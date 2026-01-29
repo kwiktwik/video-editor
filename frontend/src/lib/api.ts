@@ -183,6 +183,7 @@ export const startExport = async (
         video_url: resolvedUrl,
         start_time: clip.startTime,
         end_time: clip.endTime,
+        track: clip.track,
         effects: {
           fade_in: clip.effects.fadeIn,
           fade_out: clip.effects.fadeOut,
